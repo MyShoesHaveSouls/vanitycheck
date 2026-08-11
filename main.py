@@ -1,3 +1,4 @@
+cat << 'EOF' > main.py
 import subprocess
 import re
 import os
@@ -43,8 +44,8 @@ def calculate_final_private_key(salt, seed_private_key):
     try:
         result = subprocess.run(calc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         for line in result.stdout.splitlines():
-            if "Private Key:" in line:
-                return line.split("Private Key:")[-1].strip()
+            if "Private Key:" in line or "private" in line.lower():
+                return line.split(":")[-1].strip()
     except Exception as e:
         print(f"\n[-] Automated calculation failed: {e}")
     return "AUTOMATION_ERROR_CHECK_MANUALLY"
@@ -69,7 +70,7 @@ def run_engine():
     init_db()
     
     print("=========================================================")
-    print("🚀 NVIDIA GTX 1080 HYBRID AUTOMATED PIPELINE WITH TRACKER")
+    print("🚀 NVIDIA GTX 1080 DIAGNOSTIC PIPELINE")
     print("=========================================================")
     seed_private = input("Paste your Step 2 Secret/Private Seed Key: ").strip().lower()
     seed_public  = input("Paste your Step 2 128-char Public Key:    ").strip().lower()
@@ -116,13 +117,12 @@ def run_engine():
         mode_str = "Rich List"
         rich_set = load_richlist()
         criteria_str = f"{len(rich_set)} addresses loaded"
-        # Hardware Filter: Limits PCIe lane data flooding by a ratio of 256:1
         cmd.extend(["--matching", "00"]) 
     else:
         print("[-] Invalid execution choice.")
         return
 
-    print(f"\n[*] Activating GPU Core Array. Pipeline stream active...")
+    print(f"\n[*] Activating GPU Core Array. Printing raw output blocks below:")
     print("=========================================================")
     
     try:
@@ -130,27 +130,24 @@ def run_engine():
         
         current_address, current_salt = None, None
         total_checked = 0
-        current_speed = "Mining..."
-        last_update_time = time.time()
         
         for line in iter(process.stdout.readline, ""):
             line = line.strip()
+            if not line:
+                continue
+                
+            # Print EVERYTHING the C++ tool says directly to the console so we can spot syntax differences
+            print(f"[RAW GPU OUT]: {line}")
             
-            if any(term in line.lower() for term in ["time:", "speed:", "total:", "m/s", "h/s"]):
-                speed_match = re.search(r'(\d+\.?\d*\s*[M|G|K]?H?/s)', line, re.IGNORECASE)
-                if speed_match:
-                    current_speed = speed_match.group(1)
-                else:
-                    if ":" in line:
-                        current_speed = line.split(":")[-1].strip()
-            
-            if "Address:" in line:
-                current_address = line.split("Address:")[-1].strip()
-            if "Salt:" in line:
-                current_salt = line.split("Salt:")[-1].strip()
+            # Universal text parsing fallback rules
+            if "address:" in line.lower():
+                current_address = line.lower().split("address:")[-1].strip()
+            if "salt:" in line.lower():
+                current_salt = line.lower().split("salt:")[-1].strip()
                 
             if current_address and current_salt:
                 total_checked += 1
+                print(f" -> Python processing key slice #{total_checked}...")
                 is_match = False
                 
                 if choice == "5":
@@ -162,25 +159,15 @@ def run_engine():
                         is_match = True
                         
                 if is_match:
-                    sys.stdout.write("\r" + " " * 80 + "\r")
-                    print("🎉 MATCH FOUND BY GTX 1080!")
+                    print("\n🎉 MATCH FOUND BY GTX 1080!")
                     print(f"Address:     {current_address}")
                     print(f"Salt:        {current_salt}")
-                    print("[*] Calculating final usable private key pair...")
                     final_private_key = calculate_final_private_key(current_salt, seed_private)
                     print(f"Private Key: {final_private_key}")
-                    
-                    if log_match(mode_str, criteria_str, current_address, current_salt, final_private_key):
-                        print("[✓] Saved to secure local vault SQLite database.")
+                    log_match(mode_str, criteria_str, current_address, current_salt, final_private_key)
                     print("=========================================================")
                         
                 current_address, current_salt = None, None
-            
-            now = time.time()
-            if now - last_update_time >= 0.4:
-                sys.stdout.write(f"\r📊 [GTX 1080 Metrics: {current_speed}] | Total Filter Pass Keys Checked: {total_checked:,}")
-                sys.stdout.flush()
-                last_update_time = now
                 
     except KeyboardInterrupt:
         print("\n\n[-] Processing safely suspended via terminal request.")
@@ -188,4 +175,3 @@ def run_engine():
 
 if __name__ == "__main__":
     run_engine()
-
