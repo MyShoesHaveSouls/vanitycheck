@@ -1,21 +1,11 @@
+cat << 'EOF' > main.py
 import subprocess
 import re
 import os
 import sqlite3
 import sys
 import time
-
-def load_local_env():
-    """Reads keys automatically from a local hidden text file if it exists."""
-    keys = {"private": None, "public": None}
-    if os.path.exists(".env"):
-        with open(".env", "r") as f:
-            for line in f:
-                if "SEED_PRIVATE_KEY" in line:
-                    keys["private"] = line.split("=")[-1].strip().replace('"', '')
-                if "SEED_PUBLIC_KEY" in line:
-                    keys["public"] = line.split("=")[-1].strip().replace('"', '')
-    return keys
+import threading
 
 def init_db():
     conn = sqlite3.connect("eth_secure_vault.db")
@@ -72,7 +62,32 @@ def load_richlist(filepath="richlist.txt"):
     print(f"[✓] Successfully loaded {len(addresses)} target entries from {filepath}.")
     return addresses
 
+# Thread-safe global variables for our odometer dashboard
+current_hash_rate = 0.0
+estimated_total_checked = 0
+stop_odometer = False
+
+def odometer_thread_worker():
+    """Background visual loop: Smoothly updates screen based on actual math speed."""
+    global current_hash_rate, estimated_total_checked, stop_odometer
+    last_tick = time.time()
+    
+    while not stop_odometer:
+        time.sleep(0.1) # Smoothly update the screen 10 times a second
+        now = time.time()
+        elapsed = now - last_tick
+        last_tick = now
+        
+        # Calculate exactly how many addresses were checked in this tiny time slice
+        keys_processed_in_slice = int(current_hash_rate * 1_000_000 * elapsed)
+        estimated_total_checked += keys_processed_in_slice
+        
+        # Clear out the console line and display the self-updating numbers
+        sys.stdout.write(f"\r📊 [GTX 1080 Speed: {current_hash_rate:.2f} MH/s] | Total Keys Generated: {estimated_total_checked:,}")
+        sys.stdout.flush()
+
 def run_engine():
+    global current_hash_rate, estimated_total_checked, stop_odometer
     binary_path = "./profanity2/bin/profanity2"
     if not os.path.exists(binary_path):
         print(f"[-] Error: '{binary_path}' binary not found. Verify your path setup.")
@@ -81,23 +96,28 @@ def run_engine():
     init_db()
     
     print("=========================================================")
-    print("🚀 NVIDIA GTX 1080 AUTOMATED PIPELINE (KEYS AUTO-LOADED)")
+    print("🚀 NVIDIA GTX 1080 HYBRID AUTOMATED PIPELINE WITH TRACKER")
     print("=========================================================")
     
-    # Check if local keys exist to skip typing prompts entirely
-    cached_keys = load_local_env()
-    
-    if cached_keys["private"] and cached_keys["public"]:
-        print("[✓] Found local credentials file. Automatically loaded credentials.")
-        seed_private = cached_keys["private"]
-        seed_public = cached_keys["public"]
+    # Read automatically from local .env config
+    keys = {"private": None, "public": None}
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
+            for line in f:
+                if "SEED_PRIVATE_KEY" in line: keys["private"] = line.split("=")[-1].strip().replace('"', '')
+                if "SEED_PUBLIC_KEY" in line: keys["public"] = line.split("=")[-1].strip().replace('"', '')
+                
+    if keys["private"] and keys["public"]:
+        print("[✓] Automatically loaded local credentials.")
+        seed_private = keys["private"]
+        seed_public = keys["public"]
     else:
-        seed_private = input("Paste your Step 2 Secret/Private Seed Key: ").strip().lower()
-        seed_public  = input("Paste your Step 2 128-char Public Key:    ").strip().lower()
-    
+        seed_private = input("Paste your Secret Seed Key: ").strip().lower()
+        seed_public  = input("Paste your 128-char Public Key: ").strip().lower()
+        
     if seed_public.startswith("04") and len(seed_public) == 130:
         seed_public = seed_public[2:]
-    
+
     print("\nSelect Mode:")
     print("1. Prefix Matching  (Starts with...)")
     print("2. Suffix Matching  (Ends with...)")
@@ -111,84 +131,75 @@ def run_engine():
     rich_set = set()
 
     if choice == "1":
-        mode_str = "Prefix"
-        criteria_str = input("Enter leading characters (hex): ").strip().lower()
-        cmd.extend(["--leading", criteria_str])
-        regex_obj = re.compile(f"^0x{criteria_str}", re.IGNORECASE)
+        mode_str = "Prefix"; pat = input("Enter prefix: ").strip().lower()
+        cmd.extend(["--leading", pat]); regex_obj = re.compile(f"^0x{pat}", re.IGNORECASE)
     elif choice == "2":
-        mode_str = "Suffix"
-        criteria_str = input("Enter trailing characters (hex): ").strip().lower()
-        cmd.extend(["--matching", criteria_str]) 
-        regex_obj = re.compile(f"{criteria_str}$", re.IGNORECASE)
+        mode_str = "Suffix"; pat = input("Enter suffix: ").strip().lower()
+        cmd.extend(["--matching", pat]); regex_obj = re.compile(f"{pat}$", re.IGNORECASE)
     elif choice == "3":
-        mode_str = "Keyword"
-        criteria_str = input("Enter keyword (hex): ").strip().lower()
-        cmd.extend(["--matching", criteria_str])
-        regex_obj = re.compile(f"{criteria_str}", re.IGNORECASE)
+        mode_str = "Keyword"; pat = input("Enter keyword: ").strip().lower()
+        cmd.extend(["--matching", pat]); regex_obj = re.compile(f"{pat}", re.IGNORECASE)
     elif choice == "4":
-        mode_str = "Multi-Match"
-        pfx = input("Enter required Prefix: ").strip().lower()
-        sfx = input("Enter required Suffix: ").strip().lower()
-        criteria_str = f"P:{pfx} | S:{sfx}"
-        cmd.extend(["--matching", pfx]) 
-        regex_obj = re.compile(f"^0x{pfx}.*{sfx}$", re.IGNORECASE)
+        mode_str = "Multi-Match"; pfx = input("Prefix: ").strip().lower(); sfx = input("Suffix: ").strip().lower()
+        criteria_str = f"P:{pfx}|S:{sfx}"; cmd.extend(["--matching", pfx]); regex_obj = re.compile(f"^0x{pfx}.*{sfx}$", re.IGNORECASE)
     elif choice == "5":
-        mode_str = "Rich List"
-        rich_set = load_richlist()
-        criteria_str = f"{len(rich_set)} addresses loaded"
-        cmd.extend(["--matching", "00"]) 
+        mode_str = "Rich List"; rich_set = load_richlist()
+        criteria_str = f"{len(rich_set)} targets"; cmd.extend(["--matching", "00"])
     else:
-        print("[-] Invalid execution choice.")
-        return
+        print("[-] Invalid choice."); return
 
-    print(f"\n[*] Activating GPU Core Array. Printing raw output blocks below:")
+    print(f"\n[*] Activating GPU Core Array. Running live accumulator...")
     print("=========================================================")
     
+    # Fire up our asynchronous screen-rolling visual thread
+    o_thread = threading.Thread(target=odometer_thread_worker, daemon=True)
+    o_thread.start()
+
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        
         current_address, current_salt = None, None
-        total_checked = 0
         
         for line in iter(process.stdout.readline, ""):
             line = line.strip()
-            if not line:
-                continue
-                
-            print(f"[RAW GPU OUT]: {line}")
+            if not line: continue
             
-            if "address:" in line.lower():
-                current_address = line.lower().split("address:")[-1].strip()
-            if "salt:" in line.lower():
-                current_salt = line.lower().split("salt:")[-1].strip()
+            # Catch the raw speed text from the underlying hardware engine string
+            if any(term in line.lower() for term in ["time:", "speed:", "total:", "m/s", "h/s"]):
+                speed_match = re.search(r'(\d+\.?\d*)\s*[M]H/s', line, re.IGNORECASE)
+                if speed_match:
+                    # Dynamically adjust our global accumulator throttle
+                    current_hash_rate = float(speed_match.group(1))
+            
+            if "address:" in line.lower(): current_address = line.lower().split("address:")[-1].strip()
+            if "salt:" in line.lower(): current_salt = line.lower().split("salt:")[-1].strip()
                 
             if current_address and current_salt:
-                total_checked += 1
-                print(f" -> Python processing key slice #{total_checked}...")
                 is_match = False
-                
                 if choice == "5":
-                    clean_addr = current_address.lower().replace("0x", "")
-                    if clean_addr in rich_set:
-                        is_match = True
+                    if current_address.lower().replace("0x", "") in rich_set: is_match = True
                 else:
-                    if regex_obj.search(current_address):
-                        is_match = True
+                    if regex_obj.search(current_address): is_match = True
                         
                 if is_match:
-                    print("\n🎉 MATCH FOUND BY GTX 1080!")
+                    stop_odometer = True # Temporarily freeze the screen tick
+                    sys.stdout.write("\r" + " " * 95 + "\r")
+                    print("🎉 MATCH FOUND BY GTX 1080!")
                     print(f"Address:     {current_address}")
-                    print(f"Salt:        {current_salt}")
                     final_private_key = calculate_final_private_key(current_salt, seed_private)
                     print(f"Private Key: {final_private_key}")
                     log_match(mode_str, criteria_str, current_address, current_salt, final_private_key)
                     print("=========================================================")
+                    stop_odometer = False
+                    o_thread = threading.Thread(target=odometer_thread_worker, daemon=True)
+                    o_thread.start()
                         
                 current_address, current_salt = None, None
                 
     except KeyboardInterrupt:
-        print("\n\n[-] Processing safely suspended via terminal request.")
+        stop_odometer = True
+        print("\n\n[-] Safely shutting down pipeline nodes.")
         process.terminate()
 
 if __name__ == "__main__":
     run_engine()
+EOF
