@@ -116,7 +116,8 @@ def run_engine():
         mode_str = "Rich List"
         rich_set = load_richlist()
         criteria_str = f"{len(rich_set)} addresses loaded"
-        cmd.extend(["--matching", "0"]) 
+        # Hardware Filter: Limits PCIe lane data flooding by a ratio of 256:1
+        cmd.extend(["--matching", "00"]) 
     else:
         print("[-] Invalid execution choice.")
         return
@@ -135,13 +136,11 @@ def run_engine():
         for line in iter(process.stdout.readline, ""):
             line = line.strip()
             
-            # Universal OpenCL Stream Parser (catches any variations of speed metrics)
             if any(term in line.lower() for term in ["time:", "speed:", "total:", "m/s", "h/s"]):
                 speed_match = re.search(r'(\d+\.?\d*\s*[M|G|K]?H?/s)', line, re.IGNORECASE)
                 if speed_match:
                     current_speed = speed_match.group(1)
                 else:
-                    # Fallback if structure varies slightly
                     if ":" in line:
                         current_speed = line.split(":")[-1].strip()
             
@@ -177,10 +176,9 @@ def run_engine():
                         
                 current_address, current_salt = None, None
             
-            # Asynchronous Screen Refresher updating the console interface line
             now = time.time()
             if now - last_update_time >= 0.4:
-                sys.stdout.write(f"\r📊 [GTX 1080 Metrics: {current_speed}] | Total Keys Checked & Processed: {total_checked:,}")
+                sys.stdout.write(f"\r📊 [GTX 1080 Metrics: {current_speed}] | Total Filter Pass Keys Checked: {total_checked:,}")
                 sys.stdout.flush()
                 last_update_time = now
                 
