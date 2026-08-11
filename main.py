@@ -1,4 +1,3 @@
-cat << 'EOF' > main.py
 import subprocess
 import re
 import os
