@@ -1,4 +1,3 @@
-cat << 'EOF' > main.py
 import subprocess
 import re
 import os
@@ -202,4 +201,4 @@ def run_engine():
 
 if __name__ == "__main__":
     run_engine()
-EOF
+
