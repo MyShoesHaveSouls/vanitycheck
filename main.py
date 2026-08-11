@@ -61,29 +61,51 @@ def load_richlist(filepath="richlist.txt"):
     print(f"[✓] Successfully loaded {len(addresses)} target entries from {filepath}.")
     return addresses
 
+def get_gpu_temperature():
+    """Queries nvidia-smi directly to pull the exact hardware core temperature."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+        )
+        return f"{result.stdout.strip()}°C"
+    except:
+        return "N/A"
+
 # Thread-safe global variables for our odometer dashboard
 current_hash_rate = 0.0
 estimated_total_checked = 0
 stop_odometer = False
 
 def odometer_thread_worker():
-    """Background visual loop: Smoothly updates screen based on actual math speed."""
     global current_hash_rate, estimated_total_checked, stop_odometer
     last_tick = time.time()
+    last_temp_check = 0.0
+    gpu_temp = "Checking..."
     
     while not stop_odometer:
-        time.sleep(0.1) # Smoothly update the screen 10 times a second
+        time.sleep(0.1)
         now = time.time()
         elapsed = now - last_tick
         last_tick = now
         
-        # Calculate exactly how many addresses were checked in this tiny time slice
+        # Smoothly query nvidia-smi only once a second so we don't stress the system bus
+        if now - last_temp_check >= 1.0:
+            gpu_temp = get_gpu_temperature()
+            last_temp_check = now
+        
         keys_processed_in_slice = int(current_hash_rate * 1_000_000 * elapsed)
         estimated_total_checked += keys_processed_in_slice
         
-        # Clear out the console line and display the self-updating numbers
-        sys.stdout.write(f"\r📊 [GTX 1080 Speed: {current_hash_rate:.2f} MH/s] | Total Keys Generated: {estimated_total_checked:,}")
+        # Integrated UI Update: Displays temp, speed, and total keys processed simultaneously
+        sys.stdout.write(f"\r🔥 [GTX 1080 Temp: {gpu_temp} | Speed: {current_hash_rate:.2f} MH/s] | Total Keys Generated: {estimated_total_checked:,}")
         sys.stdout.flush()
+
+def trigger_audio_chime():
+    for _ in range(5):
+        sys.stdout.write('\a')
+        sys.stdout.flush()
+        time.sleep(0.2)
 
 def run_engine():
     global current_hash_rate, estimated_total_checked, stop_odometer
@@ -95,10 +117,9 @@ def run_engine():
     init_db()
     
     print("=========================================================")
-    print("🚀 NVIDIA GTX 1080 HYBRID AUTOMATED PIPELINE WITH TRACKER")
+    print("🚀 NVIDIA GTX 1080 HYBRID PIPELINE WITH THERMAL MONITOR")
     print("=========================================================")
     
-    # Read automatically from local .env config
     keys = {"private": None, "public": None}
     if os.path.exists(".env"):
         with open(".env", "r") as f:
@@ -147,10 +168,9 @@ def run_engine():
     else:
         print("[-] Invalid choice."); return
 
-    print(f"\n[*] Activating GPU Core Array. Running live accumulator...")
+    print(f"\n[*] Activating GPU Core Array. Running live thermal dashboard...")
     print("=========================================================")
     
-    # Fire up our asynchronous screen-rolling visual thread
     o_thread = threading.Thread(target=odometer_thread_worker, daemon=True)
     o_thread.start()
 
@@ -162,11 +182,9 @@ def run_engine():
             line = line.strip()
             if not line: continue
             
-            # Catch the raw speed text from the underlying hardware engine string
             if any(term in line.lower() for term in ["time:", "speed:", "total:", "m/s", "h/s"]):
                 speed_match = re.search(r'(\d+\.?\d*)\s*[M]H/s', line, re.IGNORECASE)
                 if speed_match:
-                    # Dynamically adjust our global accumulator throttle
                     current_hash_rate = float(speed_match.group(1))
             
             if "address:" in line.lower(): current_address = line.lower().split("address:")[-1].strip()
@@ -180,14 +198,16 @@ def run_engine():
                     if regex_obj.search(current_address): is_match = True
                         
                 if is_match:
-                    stop_odometer = True # Temporarily freeze the screen tick
-                    sys.stdout.write("\r" + " " * 95 + "\r")
+                    stop_odometer = True 
+                    sys.stdout.write("\r" + " " * 115 + "\r")
                     print("🎉 MATCH FOUND BY GTX 1080!")
                     print(f"Address:     {current_address}")
                     final_private_key = calculate_final_private_key(current_salt, seed_private)
                     print(f"Private Key: {final_private_key}")
                     log_match(mode_str, criteria_str, current_address, current_salt, final_private_key)
                     print("=========================================================")
+                    trigger_audio_chime()
+                    
                     stop_odometer = False
                     o_thread = threading.Thread(target=odometer_thread_worker, daemon=True)
                     o_thread.start()
@@ -201,4 +221,3 @@ def run_engine():
 
 if __name__ == "__main__":
     run_engine()
-
