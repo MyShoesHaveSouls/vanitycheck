@@ -1,3 +1,4 @@
+cat << 'EOF' > main.py
 import subprocess
 import re
 import os
@@ -74,7 +75,6 @@ def run_engine():
     seed_private = input("Paste your Step 2 Secret/Private Seed Key: ").strip().lower()
     seed_public  = input("Paste your Step 2 128-char Public Key:    ").strip().lower()
     
-    # Strip leading '04' uncompressed prefix if the user included it
     if seed_public.startswith("04") and len(seed_public) == 130:
         seed_public = seed_public[2:]
         print("[*] Automatically trimmed leading '04' from Public Key.")
@@ -117,7 +117,6 @@ def run_engine():
         mode_str = "Rich List"
         rich_set = load_richlist()
         criteria_str = f"{len(rich_set)} addresses loaded"
-        # Using native '0' flag tells profanity2 to stream out every calculated item
         cmd.extend(["--matching", "0"]) 
     else:
         print("[-] Invalid execution choice.")
@@ -131,20 +130,22 @@ def run_engine():
         
         current_address, current_salt = None, None
         total_checked = 0
-        current_speed = "0.00 MH/s"
+        current_speed = "Mining..."
         last_update_time = time.time()
         
         for line in iter(process.stdout.readline, ""):
             line = line.strip()
             
-            # 1. Capture speed metrics directly from the underlying OpenCL engine stream
-            if "Time:" in line and "m/s" in line:
-                # Extracts values like "Total: 45.23 MH/s" or counts from the hardware text
-                speed_match = re.search(r'(\d+\.\d+\s*[M|G]?H/s)', line)
+            # Universal OpenCL Stream Parser (catches any variations of speed metrics)
+            if any(term in line.lower() for term in ["time:", "speed:", "total:", "m/s", "h/s"]):
+                speed_match = re.search(r'(\d+\.?\d*\s*[M|G|K]?H?/s)', line, re.IGNORECASE)
                 if speed_match:
                     current_speed = speed_match.group(1)
+                else:
+                    # Fallback if structure varies slightly
+                    if ":" in line:
+                        current_speed = line.split(":")[-1].strip()
             
-            # 2. Parse structural keys output generated from the binary stream
             if "Address:" in line:
                 current_address = line.split("Address:")[-1].strip()
             if "Salt:" in line:
@@ -163,7 +164,6 @@ def run_engine():
                         is_match = True
                         
                 if is_match:
-                    # Clear out the scrolling status line so the success prints cleanly
                     sys.stdout.write("\r" + " " * 80 + "\r")
                     print("🎉 MATCH FOUND BY GTX 1080!")
                     print(f"Address:     {current_address}")
@@ -178,11 +178,10 @@ def run_engine():
                         
                 current_address, current_salt = None, None
             
-            # 3. Asynchronous Screen Refresher (updates the visual counter smoothly without slowing your card down)
+            # Asynchronous Screen Refresher updating the console interface line
             now = time.time()
             if now - last_update_time >= 0.4:
-                # \r moves the cursor back to the start of the line instead of spamming down your screen
-                sys.stdout.write(f"\r📊 [GTX 1080 Speed: {current_speed}] | Total Keys Extracted & Screened: {total_checked:,}")
+                sys.stdout.write(f"\r📊 [GTX 1080 Metrics: {current_speed}] | Total Keys Checked & Processed: {total_checked:,}")
                 sys.stdout.flush()
                 last_update_time = now
                 
@@ -192,3 +191,4 @@ def run_engine():
 
 if __name__ == "__main__":
     run_engine()
+EOF
