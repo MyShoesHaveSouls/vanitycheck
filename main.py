@@ -5,6 +5,18 @@ import sqlite3
 import sys
 import time
 
+def load_local_env():
+    """Reads keys automatically from a local hidden text file if it exists."""
+    keys = {"private": None, "public": None}
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
+            for line in f:
+                if "SEED_PRIVATE_KEY" in line:
+                    keys["private"] = line.split("=")[-1].strip().replace('"', '')
+                if "SEED_PUBLIC_KEY" in line:
+                    keys["public"] = line.split("=")[-1].strip().replace('"', '')
+    return keys
+
 def init_db():
     conn = sqlite3.connect("eth_secure_vault.db")
     cursor = conn.cursor()
@@ -69,14 +81,22 @@ def run_engine():
     init_db()
     
     print("=========================================================")
-    print("🚀 NVIDIA GTX 1080 DIAGNOSTIC PIPELINE")
+    print("🚀 NVIDIA GTX 1080 AUTOMATED PIPELINE (KEYS AUTO-LOADED)")
     print("=========================================================")
-    seed_private = input("Paste your Step 2 Secret/Private Seed Key: ").strip().lower()
-    seed_public  = input("Paste your Step 2 128-char Public Key:    ").strip().lower()
+    
+    # Check if local keys exist to skip typing prompts entirely
+    cached_keys = load_local_env()
+    
+    if cached_keys["private"] and cached_keys["public"]:
+        print("[✓] Found local credentials file. Automatically loaded credentials.")
+        seed_private = cached_keys["private"]
+        seed_public = cached_keys["public"]
+    else:
+        seed_private = input("Paste your Step 2 Secret/Private Seed Key: ").strip().lower()
+        seed_public  = input("Paste your Step 2 128-char Public Key:    ").strip().lower()
     
     if seed_public.startswith("04") and len(seed_public) == 130:
         seed_public = seed_public[2:]
-        print("[*] Automatically trimmed leading '04' from Public Key.")
     
     print("\nSelect Mode:")
     print("1. Prefix Matching  (Starts with...)")
@@ -135,10 +155,8 @@ def run_engine():
             if not line:
                 continue
                 
-            # Print EVERYTHING the C++ tool says directly to the console so we can spot syntax differences
             print(f"[RAW GPU OUT]: {line}")
             
-            # Universal text parsing fallback rules
             if "address:" in line.lower():
                 current_address = line.lower().split("address:")[-1].strip()
             if "salt:" in line.lower():
