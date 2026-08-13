@@ -4,7 +4,6 @@ import os
 import sqlite3
 import sys
 import time
-import threading
 
 def init_db():
     conn = sqlite3.connect("eth_secure_vault.db")
@@ -44,8 +43,8 @@ def calculate_final_private_key(salt, seed_private_key):
     try:
         result = subprocess.run(calc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         for line in result.stdout.splitlines():
-            if "Private Key:" in line or "private" in line.lower():
-                return line.split(":")[-1].strip()
+            if "Private Key:" in line:
+                return line.split("Private Key:")[-1].strip()
     except Exception as e:
         print(f"\n[-] Automated calculation failed: {e}")
     return "AUTOMATION_ERROR_CHECK_MANUALLY"
@@ -61,82 +60,23 @@ def load_richlist(filepath="richlist.txt"):
     print(f"[✓] Successfully loaded {len(addresses)} target entries from {filepath}.")
     return addresses
 
-def get_gpu_temperature():
-    """Queries nvidia-smi directly to pull the exact hardware core temperature."""
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
-        )
-        return f"{result.stdout.strip()}°C"
-    except:
-        return "N/A"
-
-# Thread-safe global variables for our odometer dashboard
-current_hash_rate = 0.0
-estimated_total_checked = 0
-stop_odometer = False
-
-def odometer_thread_worker():
-    global current_hash_rate, estimated_total_checked, stop_odometer
-    last_tick = time.time()
-    last_temp_check = 0.0
-    gpu_temp = "Checking..."
-    
-    while not stop_odometer:
-        time.sleep(0.1)
-        now = time.time()
-        elapsed = now - last_tick
-        last_tick = now
-        
-        # Smoothly query nvidia-smi only once a second so we don't stress the system bus
-        if now - last_temp_check >= 1.0:
-            gpu_temp = get_gpu_temperature()
-            last_temp_check = now
-        
-        keys_processed_in_slice = int(current_hash_rate * 1_000_000 * elapsed)
-        estimated_total_checked += keys_processed_in_slice
-        
-        # Integrated UI Update: Displays temp, speed, and total keys processed simultaneously
-        sys.stdout.write(f"\r🔥 [GTX 1080 Temp: {gpu_temp} | Speed: {current_hash_rate:.2f} MH/s] | Total Keys Generated: {estimated_total_checked:,}")
-        sys.stdout.flush()
-
-def trigger_audio_chime():
-    for _ in range(5):
-        sys.stdout.write('\a')
-        sys.stdout.flush()
-        time.sleep(0.2)
-
 def run_engine():
-    global current_hash_rate, estimated_total_checked, stop_odometer
     binary_path = "./profanity2/bin/profanity2"
     if not os.path.exists(binary_path):
         print(f"[-] Error: '{binary_path}' binary not found. Verify your path setup.")
         sys.exit(1)
-        
+
     init_db()
-    
+
     print("=========================================================")
-    print("🚀 NVIDIA GTX 1080 HYBRID PIPELINE WITH THERMAL MONITOR")
+    print("🚀 NVIDIA GTX 1080 HYBRID AUTOMATED PIPELINE WITH TRACKER")
     print("=========================================================")
-    
-    keys = {"private": None, "public": None}
-    if os.path.exists(".env"):
-        with open(".env", "r") as f:
-            for line in f:
-                if "SEED_PRIVATE_KEY" in line: keys["private"] = line.split("=")[-1].strip().replace('"', '')
-                if "SEED_PUBLIC_KEY" in line: keys["public"] = line.split("=")[-1].strip().replace('"', '')
-                
-    if keys["private"] and keys["public"]:
-        print("[✓] Automatically loaded local credentials.")
-        seed_private = keys["private"]
-        seed_public = keys["public"]
-    else:
-        seed_private = input("Paste your Secret Seed Key: ").strip().lower()
-        seed_public  = input("Paste your 128-char Public Key: ").strip().lower()
-        
+    seed_private = input("Paste your Step 2 Secret/Private Seed Key: ").strip().lower()
+    seed_public  = input("Paste your Step 2 128-char Public Key:    ").strip().lower()
+
     if seed_public.startswith("04") and len(seed_public) == 130:
         seed_public = seed_public[2:]
+        print("[*] Automatically trimmed leading '04' from Public Key.")
 
     print("\nSelect Mode:")
     print("1. Prefix Matching  (Starts with...)")
@@ -151,72 +91,101 @@ def run_engine():
     rich_set = set()
 
     if choice == "1":
-        mode_str = "Prefix"; pat = input("Enter prefix: ").strip().lower()
-        cmd.extend(["--leading", pat]); regex_obj = re.compile(f"^0x{pat}", re.IGNORECASE)
+        mode_str = "Prefix"
+        criteria_str = input("Enter leading characters (hex): ").strip().lower()
+        cmd.extend(["--leading", criteria_str])
+        regex_obj = re.compile(f"^0x{criteria_str}", re.IGNORECASE)
     elif choice == "2":
-        mode_str = "Suffix"; pat = input("Enter suffix: ").strip().lower()
-        cmd.extend(["--matching", pat]); regex_obj = re.compile(f"{pat}$", re.IGNORECASE)
+        mode_str = "Suffix"
+        criteria_str = input("Enter trailing characters (hex): ").strip().lower()
+        cmd.extend(["--matching", criteria_str]) 
+        regex_obj = re.compile(f"{criteria_str}$", re.IGNORECASE)
     elif choice == "3":
-        mode_str = "Keyword"; pat = input("Enter keyword: ").strip().lower()
-        cmd.extend(["--matching", pat]); regex_obj = re.compile(f"{pat}", re.IGNORECASE)
+        mode_str = "Keyword"
+        criteria_str = input("Enter keyword (hex): ").strip().lower()
+        cmd.extend(["--matching", criteria_str])
+        regex_obj = re.compile(f"{criteria_str}", re.IGNORECASE)
     elif choice == "4":
-        mode_str = "Multi-Match"; pfx = input("Prefix: ").strip().lower(); sfx = input("Suffix: ").strip().lower()
-        criteria_str = f"P:{pfx}|S:{sfx}"; cmd.extend(["--matching", pfx]); regex_obj = re.compile(f"^0x{pfx}.*{sfx}$", re.IGNORECASE)
+        mode_str = "Multi-Match"
+        pfx = input("Enter required Prefix: ").strip().lower()
+        sfx = input("Enter required Suffix: ").strip().lower()
+        criteria_str = f"P:{pfx} | S:{sfx}"
+        cmd.extend(["--matching", pfx]) 
+        regex_obj = re.compile(f"^0x{pfx}.*{sfx}$", re.IGNORECASE)
     elif choice == "5":
-        mode_str = "Rich List"; rich_set = load_richlist()
-        criteria_str = f"{len(rich_set)} targets"; cmd.extend(["--matching", "00"])
+        mode_str = "Rich List"
+        rich_set = load_richlist()
+        criteria_str = f"{len(rich_set)} addresses loaded"
+        cmd.extend(["--matching", "0"]) 
     else:
-        print("[-] Invalid choice."); return
+        print("[-] Invalid execution choice.")
+        return
 
-    print(f"\n[*] Activating GPU Core Array. Running live thermal dashboard...")
+    print(f"\n[*] Activating GPU Core Array. Pipeline stream active...")
     print("=========================================================")
-    
-    o_thread = threading.Thread(target=odometer_thread_worker, daemon=True)
-    o_thread.start()
 
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+
         current_address, current_salt = None, None
-        
+        total_checked = 0
+        current_speed = "Mining..."
+        last_update_time = time.time()
+
         for line in iter(process.stdout.readline, ""):
             line = line.strip()
-            if not line: continue
-            
+
+            # Universal OpenCL Stream Parser (catches any variations of speed metrics)
             if any(term in line.lower() for term in ["time:", "speed:", "total:", "m/s", "h/s"]):
-                speed_match = re.search(r'(\d+\.?\d*)\s*[M]H/s', line, re.IGNORECASE)
+                speed_match = re.search(r'(\d+\.?\d*\s*[M|G|K]?H?/s)', line, re.IGNORECASE)
                 if speed_match:
-                    current_hash_rate = float(speed_match.group(1))
-            
-            if "address:" in line.lower(): current_address = line.lower().split("address:")[-1].strip()
-            if "salt:" in line.lower(): current_salt = line.lower().split("salt:")[-1].strip()
-                
-            if current_address and current_salt:
-                is_match = False
-                if choice == "5":
-                    if current_address.lower().replace("0x", "") in rich_set: is_match = True
+                    current_speed = speed_match.group(1)
                 else:
-                    if regex_obj.search(current_address): is_match = True
-                        
+                    # Fallback if structure varies slightly
+                    if ":" in line:
+                        current_speed = line.split(":")[-1].strip()
+
+            if "Address:" in line:
+                current_address = line.split("Address:")[-1].strip()
+            if "Salt:" in line:
+                current_salt = line.split("Salt:")[-1].strip()
+
+            if current_address and current_salt:
+                total_checked += 1
+                is_match = False
+
+                if choice == "5":
+                    clean_addr = current_address.lower().replace("0x", "")
+                    if clean_addr in rich_set:
+                        is_match = True
+                else:
+                    if regex_obj.search(current_address):
+                        is_match = True
+
                 if is_match:
-                    stop_odometer = True 
-                    sys.stdout.write("\r" + " " * 115 + "\r")
+                    sys.stdout.write("\r" + " " * 80 + "\r")
                     print("🎉 MATCH FOUND BY GTX 1080!")
                     print(f"Address:     {current_address}")
+                    print(f"Salt:        {current_salt}")
+                    print("[*] Calculating final usable private key pair...")
                     final_private_key = calculate_final_private_key(current_salt, seed_private)
                     print(f"Private Key: {final_private_key}")
-                    log_match(mode_str, criteria_str, current_address, current_salt, final_private_key)
+
+                    if log_match(mode_str, criteria_str, current_address, current_salt, final_private_key):
+                        print("[✓] Saved to secure local vault SQLite database.")
                     print("=========================================================")
-                    trigger_audio_chime()
-                    
-                    stop_odometer = False
-                    o_thread = threading.Thread(target=odometer_thread_worker, daemon=True)
-                    o_thread.start()
-                        
+
                 current_address, current_salt = None, None
-                
+
+            # Asynchronous Screen Refresher updating the console interface line
+            now = time.time()
+            if now - last_update_time >= 0.4:
+                sys.stdout.write(f"\r📊 [GTX 1080 Metrics: {current_speed}] | Total Keys Checked & Processed: {total_checked:,}")
+                sys.stdout.flush()
+                last_update_time = now
+
     except KeyboardInterrupt:
-        stop_odometer = True
-        print("\n\n[-] Safely shutting down pipeline nodes.")
+        print("\n\n[-] Processing safely suspended via terminal request.")
         process.terminate()
 
 if __name__ == "__main__":
